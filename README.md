@@ -1,0 +1,1 @@
+# TrySmp-AFK-Bot
