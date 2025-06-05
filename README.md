@@ -41,7 +41,7 @@ A cracked-out hybrid **Minecraft + Discord** bot powered by `mineflayer` and `di
 
 ## ⚡ Author
 
-**Made by [Daimy](https://github.com/itzdaimyh)**  
+**Made by [Daimy](https://github.com/itzdaimy)**  
 Got ideas? dm me on discord @daimyh
 
 ---
