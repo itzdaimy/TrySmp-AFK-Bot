@@ -9,6 +9,10 @@ A cracked-out hybrid **Minecraft + Discord** bot powered by `mineflayer` and `di
 
 ---
 
+https://hits.sh/github.com/itzdaimyh/TrySmp-AFK-Bot.svg?style=for-the-badge&label=Views
+
+---
+
 ## 🧩 Features
 
 - 💬 `/say` command with real-time TrySMP message response relay
