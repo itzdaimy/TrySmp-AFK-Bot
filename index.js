@@ -1,9 +1,13 @@
 require('dotenv').config();
 const mineflayer = require('mineflayer');
-const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const os = require('os');
 const si = require('systeminformation');
 
+// --- CONFIGURATION ---
+const USE_DMS_FOR_OWNER = false; 
+
+// --- DO NOT TOUCH BELOW THIS LINE UNLESS YOU KNOW WHAT YOUR DOING ---
 let reconnecting = false;
 let bot = null; 
 let afkIntervalId = null;
@@ -29,7 +33,6 @@ let rejectGemPromise = null;
 let expectedDisconnect = false;
 
 let pendingSayInteraction = null;
-
 
 const BALANCE_UPDATE_INTERVAL = 30000;
 const AFK_INTERVAL = 30 * 1000;
@@ -225,54 +228,77 @@ function requestGemBalanceOnce() {
     });
 }
 
-
 async function sendOrEditStatusEmbed() {
-    if (!discordClient || typeof discordClient.isReady !== 'function' || !discordClient.isReady()) { console.log('[DISCORD] Client not ready for status embed.'); return; }
-    const channel = discordClient.channels.cache.get(DISCORD_STATUS_CHANNEL_ID);
-    if (!channel) { console.error(`[DISCORD] Status channel with ID ${DISCORD_STATUS_CHANNEL_ID} not found.`); return; }
+    if (!discordClient || !discordClient.isReady()) {
+        console.log('[DISCORD] Client not ready for status embed.');
+        return;
+    }
 
     console.log('[DISCORD] Preparing status embed...');
     const botStatus = bot && bot.player ? '🟢 Online' : '🔴 Offline';
     const statusColor = bot && bot.player ? '#2ECC71' : '#E74C3C';
     let systemInfoString = "System Info: `Loading...`";
     try {
-        const mem = await si.mem(); const currentLoad = await si.currentLoad(); const uptime = os.uptime();
+        const mem = await si.mem();
+        const currentLoad = await si.currentLoad();
+        const uptime = os.uptime();
         systemInfoString = `RAM: \`${(mem.active / (1024**3)).toFixed(2)}GB / ${(mem.total / (1024**3)).toFixed(2)}GB\`\n` +
                            `CPU: \`${currentLoad.currentLoad.toFixed(2)}%\`\n` + `Uptime: \`${formatUptime(uptime)}\``;
     } catch (err) {
-      console.error(`[DISCORD] Error fetching system info: ${err.message}`);
-      systemInfoString = "System Info: `Error fetching data`";
+        console.error(`[DISCORD] Error fetching system info: ${err.message}`);
+        systemInfoString = "System Info: `Error fetching data`";
     }
 
     const statusEmbed = new EmbedBuilder().setColor(statusColor).setTitle('Bot Status')
         .setDescription(`**Bot Status:** **${botStatus}**\n**Money Balance:** ${formatNumberShort(botMoneyBalance)}\n**Gem Balance:** ${formatNumberShort(botGemBalance)}\n\n${systemInfoString}`)
         .setTimestamp().setFooter({ text: 'Bot | IGN: daimyh' });
 
+    let channel;
     try {
-        if (statusMessage && statusMessage.id) {
-             console.log('[DISCORD] Attempting to edit existing status message.');
-             await statusMessage.edit({ embeds: [statusEmbed] }).catch(async (err) => {
-                console.error(`[DISCORD] Error editing status message: ${err.message}. Sending new message.`);
-                statusMessage = await channel.send({ embeds: [statusEmbed] });
-             });
+        if (USE_DMS_FOR_OWNER) {
+            const owner = await discordClient.users.fetch(DISCORD_OWNER_ID);
+            channel = await owner.createDM();
         } else {
-            console.log('[DISCORD] No existing status message found or invalid. Fetching recent messages to find/send new one.');
-            const messages = await channel.messages.fetch({ limit: 10 });
-            const botMessages = messages.filter(m => m.author.id === discordClient.user.id && m.embeds.length > 0 && m.embeds[0].title === 'Bot Status');
-            if (botMessages.first()) {
-              statusMessage = botMessages.first();
-              console.log('[DISCORD] Found existing bot status message, editing it.');
-              await statusMessage.edit({ embeds: [statusEmbed] });
-            }
-            else {
-              console.log('[DISCORD] No existing bot status message found, sending a new one.');
-              statusMessage = await channel.send({ embeds: [statusEmbed] });
+            channel = discordClient.channels.cache.get(DISCORD_STATUS_CHANNEL_ID);
+        }
+
+        if (!channel) {
+            const target = USE_DMS_FOR_OWNER ? `owner DMs (${DISCORD_OWNER_ID})` : `channel (${DISCORD_STATUS_CHANNEL_ID})`;
+            console.error(`[DISCORD] Could not find target ${target}.`);
+            return;
+        }
+    } catch (err) {
+        console.error(`[DISCORD] Failed to get target channel/DM: ${err.message}`);
+        return;
+    }
+
+    try {
+        if (statusMessage && statusMessage.channelId === channel.id) {
+            try {
+                await statusMessage.edit({ embeds: [statusEmbed] });
+                console.log(`[DISCORD] Status embed edited in ${USE_DMS_FOR_OWNER ? 'DMs' : 'channel'}.`);
+                return; 
+            } catch (error) {
+                console.warn(`[DISCORD] Failed to edit stored status message (ID: ${statusMessage.id}). It may have been deleted. Will find/send a new one.`);
+                statusMessage = null; 
             }
         }
-        console.log('[DISCORD] Status embed updated successfully.');
+
+        const messages = await channel.messages.fetch({ limit: 50 });
+        const lastStatusMessage = messages.find(m =>
+            m.author.id === discordClient.user.id && m.embeds.length > 0 && m.embeds[0].title === 'Bot Status'
+        );
+
+        if (lastStatusMessage) {
+            statusMessage = await lastStatusMessage.edit({ embeds: [statusEmbed] });
+            console.log(`[DISCORD] Found and edited previous status embed in ${USE_DMS_FOR_OWNER ? 'DMs' : 'channel'}.`);
+        } else {
+            statusMessage = await channel.send({ embeds: [statusEmbed] });
+            console.log(`[DISCORD] Sent new status embed to ${USE_DMS_FOR_OWNER ? 'DMs' : 'channel'}.`);
+        }
     } catch (err) {
-      console.error(`[DISCORD] Fatal error sending/editing status embed: ${err.message}`);
-      statusMessage = null;
+        console.error(`[DISCORD] Fatal error sending/editing status embed: ${err.message}`);
+        statusMessage = null;
     }
 }
 
@@ -367,10 +393,22 @@ function createBot() {
 
     if (pendingSayInteraction && msg.includes('TrySmp »')) {
         console.log(`[BOT_CHAT] Detected "TrySmp" message for /say command: ${msg}`);
-        pendingSayInteraction.editReply(`Minecraft bot output for your command:\n\`\`\`\n${msg}\n\`\`\``);
+        const interactionToReply = pendingSayInteraction;
         pendingSayInteraction = null; 
-    }
 
+        const responseEmbed = new EmbedBuilder()
+            .setColor('#2ECC71')
+            .setTitle('Minecraft Response')
+            .setDescription(`The bot said its message and received the following response:\n\n\`\`\`${msg}\`\`\``)
+            .setTimestamp();
+
+        if (USE_DMS_FOR_OWNER) {
+            interactionToReply.user.send({ embeds: [responseEmbed] }).catch(err => console.error(`[DISCORD] Failed to send /say response to DM: ${err.message}`));
+            interactionToReply.editReply({ content: 'Response received from Minecraft. Check your DMs.', ephemeral: true });
+        } else {
+            interactionToReply.editReply({ embeds: [responseEmbed], ephemeral: false });
+        }
+    }
   });
 
   bot.on('kicked', (reason) => {
@@ -446,8 +484,7 @@ discordClient = new Client({
 const commands = [
     new SlashCommandBuilder()
         .setName('status')
-        .setDescription('Checks the bot\'s Minecraft and system status (Owner Only).')
-        .toJSON(),
+        .setDescription('Checks the bot\'s Minecraft and system status (Owner Only).'),
     new SlashCommandBuilder()
         .setName('stats')
         .setDescription('Get bot statistics.')
@@ -455,17 +492,15 @@ const commands = [
             subcommand
                 .setName('info')
                 .setDescription('Shows the bot\'s money and gem balance.')
-        )
-        .toJSON(),
+        ),
     new SlashCommandBuilder()
         .setName('say')
-        .setDescription('Makes the Minecraft bot say a message and outputs the next TrySmp message (Owner Only).')
+        .setDescription('Makes the Minecraft bot say a message and waits for a response (Owner Only).')
         .addStringOption(option =>
             option.setName('message')
                 .setDescription('The message for the bot to say in Minecraft chat.')
                 .setRequired(true)
-        )
-        .toJSON(),
+        ),
 ];
 
 discordClient.once(Events.ClientReady, async c => {
@@ -475,7 +510,7 @@ discordClient.once(Events.ClientReady, async c => {
         console.log('[DISCORD] Started refreshing application (/) commands.');
         await rest.put(
             Routes.applicationGuildCommands(c.user.id, DISCORD_GUILD_ID),
-            { body: commands },
+            { body: commands.map(command => command.toJSON()) },
         );
         console.log('[DISCORD] Successfully reloaded application (/) commands.');
         sendOrEditStatusEmbed(); 
@@ -488,48 +523,39 @@ discordClient.once(Events.ClientReady, async c => {
 discordClient.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isCommand()) return;
 
-    const { commandName } = interaction;
+    try {
+        const { commandName } = interaction;
 
-    if (commandName === 'status') {
-        console.log(`[DISCORD_CMD] /status command received from ${interaction.user.tag}.`);
-        if (interaction.user.id !== DISCORD_OWNER_ID) {
-            console.warn(`[DISCORD_CMD] User ${interaction.user.tag} (${interaction.user.id}) attempted to use owner-only /status command.`);
-            await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
-            return;
-        }
-        await interaction.deferReply({ ephemeral: true });
-        await sendOrEditStatusEmbed();
-        if (statusMessage) {
-            await interaction.editReply({ content: 'Status updated. Check the status channel.', ephemeral: true });
-        } else {
-            await interaction.editReply({ content: 'Could not send status embed. Check console for errors.', ephemeral: true });
-        }
-    } else if (commandName === 'stats') {
-        const subCommand = interaction.options.getSubcommand();
-        console.log(`[DISCORD_CMD] /stats ${subCommand} command received from ${interaction.user.tag}.`);
-        if (subCommand === 'info') {
-            await interaction.deferReply();
-
-            if (!bot || !bot.player || !bot.tasksInitialized) {
-                await interaction.editReply({ content: 'Bot is not online or not fully initialized in Minecraft. Please try again in a moment.' });
-                return;
+        if (commandName === 'status') {
+            console.log(`[DISCORD_CMD] /status command received from ${interaction.user.tag}.`);
+            if (interaction.user.id !== DISCORD_OWNER_ID) {
+                return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
             }
+            await interaction.deferReply({ ephemeral: true });
+            await sendOrEditStatusEmbed();
+            const replyMessage = USE_DMS_FOR_OWNER ? 'Status has been updated in your DMs.' : 'Status updated. Check the status channel.';
+            await interaction.editReply({ content: replyMessage, ephemeral: true });
 
-            try {
+        } else if (commandName === 'stats') {
+            const subCommand = interaction.options.getSubcommand();
+            console.log(`[DISCORD_CMD] /stats ${subCommand} command received from ${interaction.user.tag}.`);
+            if (subCommand === 'info') {
+                await interaction.deferReply();
+
+                if (!bot || !bot.player || !bot.tasksInitialized) {
+                    return interaction.editReply({ content: 'Bot is not online or not fully initialized in Minecraft. Please try again in a moment.' });
+                }
+
                 const [moneyResult, gemResult] = await Promise.allSettled([
                     requestMoneyBalanceOnce(),
                     requestGemBalanceOnce()
                 ]);
 
-                const fetchedMoney = moneyResult.status === 'fulfilled' ? moneyResult.value : 0;
-                const fetchedGems = gemResult.status === 'fulfilled' ? gemResult.value : 0;
+                const fetchedMoney = moneyResult.status === 'fulfilled' ? moneyResult.value : botMoneyBalance;
+                const fetchedGems = gemResult.status === 'fulfilled' ? gemResult.value : botGemBalance;
 
-                if (moneyResult.status === 'rejected') {
-                    console.error(`[DISCORD_CMD] Money balance request failed for /stats info: ${moneyResult.reason}`);
-                }
-                if (gemResult.status === 'rejected') {
-                    console.error(`[DISCORD_CMD] Gem balance request failed for /stats info: ${gemResult.reason}`);
-                }
+                if (moneyResult.status === 'rejected') console.error(`[DISCORD_CMD] Money balance request failed: ${moneyResult.reason}`);
+                if (gemResult.status === 'rejected') console.error(`[DISCORD_CMD] Gem balance request failed: ${gemResult.reason}`);
 
                 const statsEmbed = new EmbedBuilder()
                     .setColor('#0099ff')
@@ -539,54 +565,53 @@ discordClient.on(Events.InteractionCreate, async interaction => {
                     .setFooter({ text: 'Bot | IGN: daimyh' });
 
                 await interaction.editReply({ embeds: [statsEmbed] });
-                console.log(`[DISCORD_CMD] /stats info command executed by ${interaction.user.tag}.`);
-            } catch (error) {
-                console.error(`[DISCORD_CMD] Unexpected error fetching balances for /stats info: ${error.message}`);
-                await interaction.editReply({ content: `Failed to fetch latest balances: ${error.message}` });
             }
-        }
-    } else if (commandName === 'say') { 
-        console.log(`[DISCORD_CMD] /say command received from ${interaction.user.tag}.`);
-        if (interaction.user.id !== DISCORD_OWNER_ID) {
-            console.warn(`[DISCORD_CMD] User ${interaction.user.tag} (${interaction.user.id}) attempted to use owner-only /say command.`);
-            await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
-            return;
-        }
+        } else if (commandName === 'say') {
+            console.log(`[DISCORD_CMD] /say command received from ${interaction.user.tag}.`);
+            if (interaction.user.id !== DISCORD_OWNER_ID) {
+                return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+            }
 
-        const message = interaction.options.getString('message');
-        if (!bot || !bot.player) {
-            await interaction.reply({ content: 'Minecraft bot is not online to send messages.', ephemeral: true });
-            return;
-        }
+            if (!bot || !bot.player) {
+                return interaction.reply({ content: 'Minecraft bot is not online to send messages.', ephemeral: true });
+            }
 
-        if (pendingSayInteraction) {
-            await interaction.reply({ content: 'Another /say command is already awaiting a Minecraft response. Please wait.', ephemeral: true });
-            return;
-        }
+            if (pendingSayInteraction) {
+                return interaction.reply({ content: 'Another /say command is already awaiting a Minecraft response. Please wait.', ephemeral: true });
+            }
 
-        try {
-            await interaction.deferReply();
-            pendingSayInteraction = interaction;
+            await interaction.deferReply({ ephemeral: true });
+            pendingSayInteraction = interaction; 
 
+            const message = interaction.options.getString('message');
             bot.chat(message);
-            console.log(`[BOT] Bot said: "${message}" in Minecraft. Waiting for "TrySmp" response or timeout...`);
+            console.log(`[BOT] Bot said: "${message}" in Minecraft. Waiting for response or timeout...`);
 
             setTimeout(() => {
-                if (pendingSayInteraction === interaction) { 
-                    console.log('[DISCORD_CMD] /say command timeout: No specific TrySmp response. Confirming message sent.');
-                    interaction.editReply(`Bot sent: "${message}" to Minecraft. No specific "TrySmp" response was received.`);
+                if (pendingSayInteraction && pendingSayInteraction.id === interaction.id) {
+                    console.log('[DISCORD_CMD] /say command timed out.');
+                    const timeoutEmbed = new EmbedBuilder()
+                        .setColor('#E67E22')
+                        .setTitle('Command Timed Out')
+                        .setDescription(`The bot sent \`${message}\` to Minecraft, but no specific "TrySmp" response was received within 5 seconds.`)
+                        .setTimestamp();
+                    
+                    if (USE_DMS_FOR_OWNER) {
+                        interaction.user.send({ embeds: [timeoutEmbed] }).catch(err => console.error(`[DISCORD] Failed to send /say timeout notice to DM: ${err.message}`));
+                        interaction.editReply({ content: 'Command sent, but no response was received in time. Check your DMs.' });
+                    } else {
+                        interaction.editReply({ embeds: [timeoutEmbed], ephemeral: false });
+                    }
                     pendingSayInteraction = null;
                 }
-            }, 5000); 
-
-        } catch (error) {
-            console.error(`[DISCORD_CMD] Error making bot say message: ${error.message}`);
-            if (pendingSayInteraction === interaction) {
-                await interaction.editReply({ content: `Failed to make bot say message: ${error.message}`, ephemeral: true });
-                pendingSayInteraction = null;
-            } else {
-                await interaction.reply({ content: `Failed to make bot say message: ${error.message}`, ephemeral: true });
-            }
+            }, 5000);
+        }
+    } catch (error) {
+        console.error(`[DISCORD_FATAL] An error occurred during interaction handling:`, error);
+        if (interaction.deferred || interaction.replied) {
+            await interaction.editReply({ content: 'An unexpected error occurred while processing your command.', ephemeral: true }).catch(e => {});
+        } else {
+            await interaction.reply({ content: 'An unexpected error occurred while processing your command.', ephemeral: true }).catch(e => {});
         }
     }
 });
@@ -619,6 +644,5 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('uncaughtException', (error) => {
   console.error('[FATAL_ERROR] UNCAUGHT EXCEPTION:', error);
-  console.error(`[FATAL_ERROR] Stack: ${error.stack}`);
   gracefulShutdown('uncaughtException');
 });
