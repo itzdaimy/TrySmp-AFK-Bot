@@ -19,7 +19,7 @@ A cracked-out hybrid **Minecraft + Discord** bot powered by `mineflayer` and `di
 - 💰 Money + Gem balance checks via `/stats info`
 - 💤 Anti-AFK movement + smart auto-eating logic
 - 🛠 Auto reconnection and error recovery
-- 📡 Status updates in a Discord embed
+- 📡 Status updates in a Discord embed (dms/server)
 - 🧠 Fully slash-command based for max control
 
 ---
