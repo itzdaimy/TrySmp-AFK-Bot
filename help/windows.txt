@@ -1,0 +1,119 @@
+📦 TrySmp-AFK-Bot Setup Tutorial (Windows)
+By: Daimy
+
+────────────────────────────────────────────
+🌐 Step 1: Install Node.js (includes npm)
+────────────────────────────────────────────
+
+1. Open your browser and go to: https://nodejs.org/
+2. Click the "LTS" download button (Recommended for most users)
+3. Run the installer:
+   - Accept terms
+   - Use default settings (just spam "Next")
+   - Finish the install
+
+4. To verify install:
+   - Press `Windows + R`, type `cmd`, press Enter
+   - In the terminal, type:
+
+node -v
+npm -v
+
+✅ If you see version numbers for both, Node.js and npm are installed.
+
+───────────────────────────────
+🔧 Step 2: Install Git for Windows
+───────────────────────────────
+
+1. Go to: https://git-scm.com/
+2. Click the download button
+3. Run the installer:
+   - Use default settings
+   - Click "Next" until "Install", then click "Install"
+
+4. To verify install:
+   - Open CMD again and type:
+
+git --version
+
+✅ You should see something like `git version 2.xx.x`
+
+───────────────────────────────
+📁 Step 3: Clone the GitHub Repo
+───────────────────────────────
+
+1. Choose a folder where you want the bot (e.g. Desktop)
+2. Open CMD and navigate there:
+
+cd %USERPROFILE%\Desktop
+
+3. Clone the repo:
+
+git clone https://github.com/itzdaimy/TrySmp-AFK-Bot.git
+
+4. Move into the folder:
+
+cd TrySmp-AFK-Bot
+
+─────────────────────────────────────
+📦 Step 4: Install the Node.js Modules
+─────────────────────────────────────
+
+Run this inside the cloned folder:
+
+npm install
+
+📌 This reads `package.json` and installs all needed dependencies.
+
+────────────────────────────
+🧾 Step 5: Configure the Bot
+────────────────────────────
+
+1. Open the file `.env` using Notepad or any text editor
+2. Follow the instructions already inside to set your bot settings
+3. Save and close the file
+
+✅ The bot is now configured and ready to launch.
+
+────────────────────────────
+🚀 Step 6: Run the Bot
+────────────────────────────
+
+Once the install is done and config is set, run:
+
+node index.js
+
+🟢 The bot should now launch and show output in the console.
+
+────────────────────────────
+🔁 Step 7: (Optional) Auto-Restart the Bot (Windows Friendly)
+────────────────────────────
+
+Option A: Use nodemon (good for development):
+    npm install -g nodemon
+    nodemon index.js
+
+Option B: Use a .bat file loop (for simple auto-restart):
+Create a new file called start.bat and paste this in:
+
+    @echo off
+    :loop
+    node index.js
+    echo Restarting in 5 seconds...
+    timeout /t 5
+    goto loop
+
+Double-click start.bat to launch the bot with auto-restart.
+
+────────────────────────────
+✅ Done!
+────────────────────────────
+
+Your bot is now running.
+
+- If you need to edit config: open the `.env` file in Notepad or any other text editor
+- If you want to update the bot:
+  git pull
+  npm install
+
+Made by Daimy 💻
