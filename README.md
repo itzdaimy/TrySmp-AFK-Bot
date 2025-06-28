@@ -54,7 +54,7 @@ Got ideas? dm me on discord @daimyh
 
 The bot’s live and thriving on TrySMP. Future updates might include:
 - UI dashboard
-- Multi-server support
+- Multi-bot support
 - Persistent command queue
 
 ---
